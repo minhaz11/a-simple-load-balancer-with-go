@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,7 @@ func (opts *Opts) SetTimeout(timeout time.Duration) *Opts {
 type ConnectionPool struct {
 	*Opts
 	clients map[string][]*http.Client
+	mu sync.Mutex
 }
 
 
@@ -47,6 +49,8 @@ func NewConnectionPool(opts *Opts) *ConnectionPool  {
 }
 
 func (cp *ConnectionPool) Get(serverAddr string) *http.Client {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
 
 	clients, ok := cp.clients[serverAddr]
 
@@ -65,6 +69,9 @@ func (cp *ConnectionPool) Get(serverAddr string) *http.Client {
 }
 
 func (cp *ConnectionPool) Put(serverAddr string, client *http.Client) error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	
 	if len(cp.clients[serverAddr]) > cp.maxConnections {
 		return fmt.Errorf("connection pool limit exceeded for serer '%s'", serverAddr)
 	}

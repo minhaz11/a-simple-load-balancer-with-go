@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -17,23 +18,24 @@ type Server struct {
 
 type LoadBalancer struct {
 	Servers []*Server
-	cp  *ConnectionPool
+	mu      sync.Mutex
+	cp      *ConnectionPool
 	idx     int
 }
 
 func NewLoadBalancer(urls []string, opts *Opts) *LoadBalancer {
 	servers := make([]*Server, len(urls))
 
-	for i, url := range urls{
+	for i, url := range urls {
 		servers[i] = &Server{
-			URL: url,
+			URL:     url,
 			healthy: true,
 		}
 	}
 
 	return &LoadBalancer{
 		Servers: servers,
-		cp : NewConnectionPool(opts),
+		cp:      NewConnectionPool(opts),
 	}
 
 }
@@ -74,6 +76,10 @@ func (lb *LoadBalancer) RunHealthCheck() {
 
 func (lb *LoadBalancer) NextServer() (*Server, error) {
 
+	lb.mu.Lock()
+
+	defer lb.mu.Unlock()
+
 	if lb.hasUnhealthyServer() {
 		for idx := 0; idx < len(lb.Servers); idx++ {
 			if lb.Servers[idx].healthy {
@@ -87,7 +93,7 @@ func (lb *LoadBalancer) NextServer() (*Server, error) {
 	if lb.idx == len(lb.Servers) {
 		lb.idx = 0
 
-		return nil, errors.New("no healthy server found.")
+		return nil, errors.New("no healthy server found")
 	}
 
 	server := lb.Servers[lb.idx]
@@ -100,6 +106,9 @@ func (lb *LoadBalancer) NextServer() (*Server, error) {
 func (lb *LoadBalancer) ForwardRequest(server *Server, uri string) (*http.Response, error) {
 	fmt.Printf("Forwarding request to : %s\n", server.URL)
 
+	client := lb.cp.Get(server.URL)
+	defer lb.cp.Put(server.URL, client)
+
 	parsedUrl, err := url.Parse(server.URL)
 
 	if err != nil {
@@ -109,7 +118,7 @@ func (lb *LoadBalancer) ForwardRequest(server *Server, uri string) (*http.Respon
 
 	fullUrl := parsedUrl.ResolveReference(&url.URL{Path: uri})
 
-	response, err := http.Get(fullUrl.String())
+	response, err := client.Get(fullUrl.String())
 
 	if err != nil {
 		log.Fatal("Error sending request to server : ", fullUrl)
