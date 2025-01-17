@@ -1,26 +1,21 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 func main() {
 
-	servers := []*Server{
-		{
-			URL: "http://127.0.0.1:8000",
-		},
+	urls := []string{"http://127.0.0.1:8000", "http://127.0.0.1:8001"}
 
-		{
-			URL: "http://127.0.0.1:8001",
-		},
-	}
+	opts := NewOpts().MaxConnections(100).SetTimeout(15 * time.Second)
 
-	loadBalancer := &LoadBalancer{
-		Servers: servers,
-	}
+	lb := NewLoadBalancer(urls, opts)
 
-	loadBalancer.RunHealthCheck()
+	lb.RunHealthCheck()
 
-	err := http.ListenAndServe(":8080", loadBalancer)
+	err := http.ListenAndServe(":8080", lb)
 
 	if err != nil {
 		panic(err)

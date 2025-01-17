@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,7 +17,35 @@ type Server struct {
 
 type LoadBalancer struct {
 	Servers []*Server
+	cp  *ConnectionPool
 	idx     int
+}
+
+func NewLoadBalancer(urls []string, opts *Opts) *LoadBalancer {
+	servers := make([]*Server, len(urls))
+
+	for i, url := range urls{
+		servers[i] = &Server{
+			URL: url,
+			healthy: true,
+		}
+	}
+
+	return &LoadBalancer{
+		Servers: servers,
+		cp : NewConnectionPool(opts),
+	}
+
+}
+
+func (lb *LoadBalancer) hasUnhealthyServer() bool {
+	for _, server := range lb.Servers {
+		if !server.healthy {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (lb *LoadBalancer) ServerHealthCheck() {
@@ -33,7 +62,7 @@ func (lb *LoadBalancer) ServerHealthCheck() {
 	}
 }
 
-func (lb * LoadBalancer) RunHealthCheck(){
+func (lb *LoadBalancer) RunHealthCheck() {
 	ticker := time.NewTicker(10 * time.Second)
 
 	go func() {
@@ -43,12 +72,29 @@ func (lb * LoadBalancer) RunHealthCheck(){
 	}()
 }
 
-func (lb *LoadBalancer) NextServer() *Server {
+func (lb *LoadBalancer) NextServer() (*Server, error) {
+
+	if lb.hasUnhealthyServer() {
+		for idx := 0; idx < len(lb.Servers); idx++ {
+			if lb.Servers[idx].healthy {
+				break
+			}
+
+			lb.idx = idx
+		}
+	}
+
+	if lb.idx == len(lb.Servers) {
+		lb.idx = 0
+
+		return nil, errors.New("no healthy server found.")
+	}
+
 	server := lb.Servers[lb.idx]
 
 	lb.idx = (lb.idx + 1) % len(lb.Servers)
 
-	return server
+	return server, nil
 }
 
 func (lb *LoadBalancer) ForwardRequest(server *Server, uri string) (*http.Response, error) {
@@ -74,7 +120,12 @@ func (lb *LoadBalancer) ForwardRequest(server *Server, uri string) (*http.Respon
 }
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	nextServer := lb.NextServer()
+
+	nextServer, err := lb.NextServer()
+	if err != nil {
+		panic(err)
+	}
+
 	res, err := lb.ForwardRequest(nextServer, r.RequestURI)
 
 	if err != nil {
