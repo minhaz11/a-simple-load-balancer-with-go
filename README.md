@@ -37,7 +37,9 @@ servers:
 
 ### Build and run the project:
 ```bash
-make run
+go run .
+or 
+go build -o <name>
 ```
 
 ## Usage
